@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --text: #1e293b;
+  --text-secondary: #64748b;
+  --border: #e2e8f0;
+  --msg-own: #3b82f6;
+  --msg-peer: #e2e8f0;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --radius: 12px;
+}
+
+html, body { height: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+/* ── Header ── */
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+}
+
+.status-dot.online { background: var(--success); }
+
+.status-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.btn-settings {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.btn-settings:hover { background: var(--bg); }
+
+/* ── Settings panel ── */
+.settings-panel {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 16px;
+  display: none;
+  flex-shrink: 0;
+}
+
+.settings-panel.open { display: block; }
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: monospace;
+  outline: none;
+}
+
+.field input:focus { border-color: var(--primary); }
+
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn-primary:hover { background: var(--primary-hover); }
+
+.btn-secondary {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+/* ── Messages area ── */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msg {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  line-height: 1.4;
+  word-wrap: break-word;
+  position: relative;
+}
+
+.msg .msg-time {
+  font-size: 11px;
+  color: rgba(0,0,0,0.4);
+  margin-top: 4px;
+  display: block;
+}
+
+.msg.own {
+  align-self: flex-end;
+  background: var(--msg-own);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.msg.own .msg-time { color: rgba(255,255,255,0.6); }
+
+.msg.peer {
+  align-self: flex-start;
+  background: var(--msg-peer);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+
+.msg.system {
+  align-self: center;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 4px 12px;
+  max-width: 90%;
+  text-align: center;
+}
+
+/* ── Input area ── */
+.input-area {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  font-size: 15px;
+  outline: none;
+}
+
+.input-area input:focus { border-color: var(--primary); }
+
+.btn-send {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-send:hover { background: var(--primary-hover); }
+
+.btn-send:disabled {
+  background: var(--border);
+  cursor: not-allowed;
+}
+
+.btn-send svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+/* ── Responsive ── */
+@media (max-width: 480px) {
+  .header { padding: 10px 12px; }
+  .header h1 { font-size: 16px; }
+  .messages { padding: 12px; }
+  .msg { max-width: 85%; }
+  .input-area { padding: 10px 12px; }
+  .settings-panel { padding: 12px; }
+}
+
+@media (min-width: 768px) {
+  body {
+    max-width: 700px;
+    margin: 0 auto;
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Chat</h1>
+  <span class="status-dot" id="statusDot"></span>
+  <span class="status-text" id="statusText">Offline</span>
+  <button class="btn-settings" id="btnSettings">Settings</button>
+</div>
+
+<div class="settings-panel" id="settingsPanel">
+  <div class="settings-grid">
+    <div class="field">
+      <label>My UUID</label>
+      <div class="field-row">
+        <input type="text" id="myUuid" readonly>
+        <button class="btn btn-secondary btn-sm" id="btnCopyUuid" title="Copy">Copy</button>
+        <button class="btn btn-secondary btn-sm" id="btnNewUuid" title="New UUID">New</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Peer UUID</label>
+      <div class="field-row">
+        <input type="text" id="peerUuid" placeholder="Enter peer UUID...">
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-row">
+        <button class="btn btn-primary" id="btnConnect">Connect</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="messages" id="messages">
+  <div class="msg system">Open Settings, paste the peer's UUID and press Connect to start chatting.</div>
+</div>
+
+<div class="input-area">
+  <input type="text" id="msgInput" placeholder="Type a message..." disabled>
+  <button class="btn-send" id="btnSend" disabled>
+    <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+  </button>
+</div>
+
+<script src="/static/socket.io.min.js"></script>
+<script>
+(function() {
+  // ── Elements ──
+  const statusDot   = document.getElementById('statusDot');
+  const statusText  = document.getElementById('statusText');
+  const btnSettings = document.getElementById('btnSettings');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const myUuidInput = document.getElementById('myUuid');
+  const peerUuidInput = document.getElementById('peerUuid');
+  const btnCopyUuid = document.getElementById('btnCopyUuid');
+  const btnNewUuid  = document.getElementById('btnNewUuid');
+  const btnConnect  = document.getElementById('btnConnect');
+  const messagesDiv = document.getElementById('messages');
+  const msgInput    = document.getElementById('msgInput');
+  const btnSend     = document.getElementById('btnSend');
+
+  // ── Helpers ──
+  function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  // ── State ──
+  let myUuid   = localStorage.getItem('chat_my_uuid') || generateUUID();
+  let peerUuid = localStorage.getItem('chat_peer_uuid') || '';
+  let registered = false;
+  let socket = null;
+
+  myUuidInput.value = myUuid;
+  peerUuidInput.value = peerUuid;
+  localStorage.setItem('chat_my_uuid', myUuid);
+
+  // ── Helpers ──
+  function timeStr() {
+    const d = new Date();
+    return d.getHours().toString().padStart(2, '0') + ':' +
+           d.getMinutes().toString().padStart(2, '0');
+  }
+
+  function addMessage(text, type) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + type;
+    if (type === 'system') {
+      div.textContent = text;
+    } else {
+      const span = document.createElement('span');
+      span.textContent = text;
+      div.appendChild(span);
+      const time = document.createElement('span');
+      time.className = 'msg-time';
+      time.textContent = timeStr();
+      div.appendChild(time);
+    }
+    messagesDiv.appendChild(div);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  function setStatus(online, text) {
+    statusDot.classList.toggle('online', online);
+    statusText.textContent = text;
+  }
+
+  function setInputEnabled(enabled) {
+    msgInput.disabled = !enabled;
+    btnSend.disabled = !enabled;
+    if (enabled) msgInput.focus();
+  }
+
+  // ── Settings toggle ──
+  btnSettings.addEventListener('click', function() {
+    settingsPanel.classList.toggle('open');
+  });
+
+  btnCopyUuid.addEventListener('click', function() {
+    navigator.clipboard.writeText(myUuidInput.value).then(function() {
+      btnCopyUuid.textContent = 'OK!';
+      setTimeout(function() { btnCopyUuid.textContent = 'Copy'; }, 1500);
+    });
+  });
+
+  btnNewUuid.addEventListener('click', function() {
+    myUuid = generateUUID();
+    myUuidInput.value = myUuid;
+    localStorage.setItem('chat_my_uuid', myUuid);
+    if (socket && socket.connected) {
+      socket.emit('register', { uuid: myUuid });
+    }
+  });
+
+  // ── Connect ──
+  btnConnect.addEventListener('click', function() {
+    peerUuid = peerUuidInput.value.trim();
+    if (!peerUuid) {
+      addMessage('Enter peer UUID first.', 'system');
+      return;
+    }
+    localStorage.setItem('chat_peer_uuid', peerUuid);
+
+    if (socket && socket.connected) {
+      if (!registered) {
+        socket.emit('register', { uuid: myUuid });
+      } else {
+        addMessage('Connected. Peer: ' + peerUuid.slice(0, 8) + '...', 'system');
+        setInputEnabled(true);
+        settingsPanel.classList.remove('open');
+      }
+      return;
+    }
+
+    btnConnect.textContent = 'Connecting...';
+    btnConnect.disabled = true;
+
+    socket = io({ transports: ['websocket', 'polling'] });
+
+    socket.on('connect', function() {
+      setStatus(true, 'Online');
+      socket.emit('register', { uuid: myUuid });
+    });
+
+    socket.on('registered', function(data) {
+      registered = true;
+      addMessage('Connected as ' + data.uuid.slice(0, 8) + '...', 'system');
+      if (peerUuid) {
+        addMessage('Chatting with ' + peerUuid.slice(0, 8) + '...', 'system');
+        setInputEnabled(true);
+      }
+      settingsPanel.classList.remove('open');
+      btnConnect.textContent = 'Connected';
+    });
+
+    socket.on('message', function(data) {
+      addMessage(data.text, 'peer');
+    });
+
+    socket.on('message_sent', function() {
+      // confirmation, already shown as own message
+    });
+
+    socket.on('error', function(data) {
+      addMessage(data.message, 'system');
+    });
+
+    socket.on('disconnect', function() {
+      registered = false;
+      setStatus(false, 'Offline');
+      setInputEnabled(false);
+      btnConnect.textContent = 'Connect';
+      btnConnect.disabled = false;
+      addMessage('Disconnected from server.', 'system');
+    });
+  });
+
+  // ── Send message ──
+  function sendMessage() {
+    const text = msgInput.value.trim();
+    if (!text || !peerUuid || !registered) return;
+    socket.emit('message', { to_uuid: peerUuid, text: text });
+    addMessage(text, 'own');
+    msgInput.value = '';
+    msgInput.focus();
+  }
+
+  btnSend.addEventListener('click', sendMessage);
+
+  msgInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // ── Update peer UUID live ──
+  peerUuidInput.addEventListener('input', function() {
+    peerUuid = peerUuidInput.value.trim();
+    localStorage.setItem('chat_peer_uuid', peerUuid);
+  });
+})();
+</script>
+
+</body>
+</html>

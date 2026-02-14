@@ -125,5 +125,8 @@ if __name__ == "__main__":
             sys.exit(1)
         asyncio.run(run_client(my_uuid, peer_uuid, url))
     else:
-        app = ASGIApp(sio)
+        app = ASGIApp(sio, static_files={
+            "/chat": "templates/chat.html",
+            "/static/socket.io.min.js": "static/socket.io.min.js",
+        })
         run(app, host="0.0.0.0", port=8000)
