@@ -9,5 +9,6 @@ python main.py
 send message:
 ~~~
 python main.py --client aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+python main.py --client bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 ~~~
 
