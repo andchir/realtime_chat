@@ -6,7 +6,7 @@ import asyncio
 import uuid
 import socketio
 
-sio = socketio.AsyncServer(async_mode="asyncio", cors_allowed_origins="*")
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 
 # sid -> user uuid; uuid -> sid (for message routing)
 users_by_sid: dict[str, str] = {}
