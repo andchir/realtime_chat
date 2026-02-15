@@ -287,26 +287,29 @@ body {
       <label>My UUID</label>
       <div class="field-row">
         <input type="text" id="myUuid" readonly>
-        <button class="btn btn-secondary btn-sm" id="btnCopyUuid" title="Copy">Copy</button>
-        <button class="btn btn-secondary btn-sm" id="btnNewUuid" title="New UUID">New</button>
+        <button class="btn btn-secondary btn-sm" id="btnCopyUuid" title="Copy UUID">Copy</button>
+        <button class="btn btn-secondary btn-sm" id="btnNewUuid" title="Generate new UUID">New</button>
       </div>
     </div>
     <div class="field">
-      <label>Peer UUID</label>
+      <label>Invite Link</label>
       <div class="field-row">
-        <input type="text" id="peerUuid" placeholder="Enter peer UUID...">
+        <input type="text" id="inviteLink" readonly>
+        <button class="btn btn-primary btn-sm" id="btnCopyLink" title="Copy invite link">Copy Link</button>
       </div>
     </div>
     <div class="field">
+      <label>Connect to peer (optional)</label>
       <div class="field-row">
-        <button class="btn btn-primary" id="btnConnect">Connect</button>
+        <input type="text" id="peerUuid" placeholder="Enter peer UUID or leave empty...">
+        <button class="btn btn-secondary btn-sm" id="btnSetPeer">Set</button>
       </div>
     </div>
   </div>
 </div>
 
 <div class="messages" id="messages">
-  <div class="msg system">Open Settings, paste the peer's UUID and press Connect to start chatting.</div>
+  <div class="msg system">Connecting to server...</div>
 </div>
 
 <div class="input-area">
@@ -326,9 +329,11 @@ body {
   const settingsPanel = document.getElementById('settingsPanel');
   const myUuidInput = document.getElementById('myUuid');
   const peerUuidInput = document.getElementById('peerUuid');
+  const inviteLinkInput = document.getElementById('inviteLink');
   const btnCopyUuid = document.getElementById('btnCopyUuid');
   const btnNewUuid  = document.getElementById('btnNewUuid');
-  const btnConnect  = document.getElementById('btnConnect');
+  const btnCopyLink = document.getElementById('btnCopyLink');
+  const btnSetPeer  = document.getElementById('btnSetPeer');
   const messagesDiv = document.getElementById('messages');
   const msgInput    = document.getElementById('msgInput');
   const btnSend     = document.getElementById('btnSend');
@@ -341,15 +346,29 @@ body {
     });
   }
 
+  // ── Get peer UUID from URL ──
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlPeerUuid = urlParams.get('peer');
+
   // ── State ──
   let myUuid   = localStorage.getItem('chat_my_uuid') || generateUUID();
-  let peerUuid = localStorage.getItem('chat_peer_uuid') || '';
+  let peerUuid = urlPeerUuid || localStorage.getItem('chat_peer_uuid') || '';
   let registered = false;
   let socket = null;
 
   myUuidInput.value = myUuid;
   peerUuidInput.value = peerUuid;
   localStorage.setItem('chat_my_uuid', myUuid);
+  if (peerUuid) {
+    localStorage.setItem('chat_peer_uuid', peerUuid);
+  }
+
+  // ── Generate invite link ──
+  function updateInviteLink() {
+    const baseUrl = window.location.origin + window.location.pathname;
+    inviteLinkInput.value = baseUrl + '?peer=' + myUuid;
+  }
+  updateInviteLink();
 
   // ── Helpers ──
   function timeStr() {
@@ -399,38 +418,41 @@ body {
     });
   });
 
+  btnCopyLink.addEventListener('click', function() {
+    navigator.clipboard.writeText(inviteLinkInput.value).then(function() {
+      btnCopyLink.textContent = 'Copied!';
+      setTimeout(function() { btnCopyLink.textContent = 'Copy Link'; }, 1500);
+    });
+  });
+
   btnNewUuid.addEventListener('click', function() {
     myUuid = generateUUID();
     myUuidInput.value = myUuid;
     localStorage.setItem('chat_my_uuid', myUuid);
+    updateInviteLink();
     if (socket && socket.connected) {
+      registered = false;
       socket.emit('register', { uuid: myUuid });
     }
   });
 
-  // ── Connect ──
-  btnConnect.addEventListener('click', function() {
+  btnSetPeer.addEventListener('click', function() {
     peerUuid = peerUuidInput.value.trim();
-    if (!peerUuid) {
-      addMessage('Enter peer UUID first.', 'system');
-      return;
-    }
     localStorage.setItem('chat_peer_uuid', peerUuid);
-
-    if (socket && socket.connected) {
-      if (!registered) {
-        socket.emit('register', { uuid: myUuid });
-      } else {
-        addMessage('Connected. Peer: ' + peerUuid.slice(0, 8) + '...', 'system');
+    if (peerUuid) {
+      addMessage('Peer set to ' + peerUuid.slice(0, 8) + '...', 'system');
+      if (registered) {
         setInputEnabled(true);
-        settingsPanel.classList.remove('open');
       }
-      return;
+    } else {
+      addMessage('Peer cleared. You can receive messages but cannot send.', 'system');
+      setInputEnabled(false);
     }
+    settingsPanel.classList.remove('open');
+  });
 
-    btnConnect.textContent = 'Connecting...';
-    btnConnect.disabled = true;
-
+  // ── Auto-connect to server ──
+  function connectToServer() {
     socket = io({ transports: ['websocket', 'polling'] });
 
     socket.on('connect', function() {
@@ -442,14 +464,23 @@ body {
       registered = true;
       addMessage('Connected as ' + data.uuid.slice(0, 8) + '...', 'system');
       if (peerUuid) {
-        addMessage('Chatting with ' + peerUuid.slice(0, 8) + '...', 'system');
+        addMessage('Ready to chat with ' + peerUuid.slice(0, 8) + '...', 'system');
         setInputEnabled(true);
+      } else {
+        addMessage('Share your invite link to start chatting!', 'system');
       }
-      settingsPanel.classList.remove('open');
-      btnConnect.textContent = 'Connected';
     });
 
     socket.on('message', function(data) {
+      const fromUuid = data.from_uuid;
+      // If we don't have a peer set, auto-set it to the sender
+      if (!peerUuid && fromUuid) {
+        peerUuid = fromUuid;
+        peerUuidInput.value = peerUuid;
+        localStorage.setItem('chat_peer_uuid', peerUuid);
+        addMessage('Auto-connected to ' + peerUuid.slice(0, 8) + '...', 'system');
+        setInputEnabled(true);
+      }
       addMessage(data.text, 'peer');
     });
 
@@ -465,11 +496,12 @@ body {
       registered = false;
       setStatus(false, 'Offline');
       setInputEnabled(false);
-      btnConnect.textContent = 'Connect';
-      btnConnect.disabled = false;
-      addMessage('Disconnected from server.', 'system');
+      addMessage('Disconnected from server. Reconnecting...', 'system');
     });
-  });
+  }
+
+  // Connect on page load
+  connectToServer();
 
   // ── Send message ──
   function sendMessage() {
@@ -490,11 +522,6 @@ body {
     }
   });
 
-  // ── Update peer UUID live ──
-  peerUuidInput.addEventListener('input', function() {
-    peerUuid = peerUuidInput.value.trim();
-    localStorage.setItem('chat_peer_uuid', peerUuid);
-  });
 })();
 </script>
 

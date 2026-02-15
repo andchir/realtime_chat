@@ -182,7 +182,7 @@ if __name__ == "__main__":
         routes = [
             Route("/api/send-message", send_message_api, methods=["POST"]),
             Mount("/", ASGIApp(sio, static_files={
-                "/chat": "templates/chat.html",
+                "/chat": "templates/chat_socketio.html",
                 "/static/socket.io.min.js": "static/socket.io.min.js",
             })),
         ]
