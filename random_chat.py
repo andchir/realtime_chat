@@ -139,11 +139,19 @@ def parse_uuid(value: object) -> str | None:
 
 
 def parse_profile(data: dict) -> tuple[dict[str, str | int] | None, str | None]:
+    def integer_from_string(value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        try:
+            return int(value.strip())
+        except ValueError:
+            return value
+
     gender = data.get("gender")
     desired_gender = data.get("desired_gender")
-    age = data.get("age")
-    desired_age_over = data.get("desired_age_over")
-    desired_age_under = data.get("desired_age_under")
+    age = integer_from_string(data.get("age"))
+    desired_age_over = integer_from_string(data.get("desired_age_over"))
+    desired_age_under = integer_from_string(data.get("desired_age_under"))
 
     if isinstance(gender, str):
         gender = gender.strip().lower()

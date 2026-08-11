@@ -38,29 +38,29 @@ publicly reachable.
 Create a system user that cannot log in interactively:
 
 ```bash
-sudo useradd --system --user-group --home-dir /opt/realtime_chat --shell /usr/sbin/nologin realtime-chat
-sudo install -d -o realtime-chat -g realtime-chat /opt/realtime_chat
+sudo useradd --system --user-group --home-dir /opt/random_chat --shell /usr/sbin/nologin random-chat
+sudo install -d -o random-chat -g random-chat /opt/random_chat
 ```
 
 Clone the repository:
 
 ```bash
-sudo -u realtime-chat git clone https://example.com/your/realtime_chat.git /opt/realtime_chat
+sudo -u random-chat git clone https://example.com/your/random_chat.git /opt/random_chat
 ```
 
 For a private repository, upload an archive or use a deployment key instead.
 After copying files manually, give the service user ownership:
 
 ```bash
-sudo chown -R realtime-chat:realtime-chat /opt/realtime_chat
+sudo chown -R random-chat:random-chat /opt/random_chat
 ```
 
 ## 3. Create the Python environment
 
 ```bash
-sudo -u realtime-chat python3 -m venv /opt/realtime_chat/venv
-sudo -u realtime-chat /opt/realtime_chat/venv/bin/pip install --upgrade pip
-sudo -u realtime-chat /opt/realtime_chat/venv/bin/pip install -r /opt/realtime_chat/requirements.txt
+sudo -u random-chat python3 -m venv /opt/random_chat/venv
+sudo -u random-chat /opt/random_chat/venv/bin/pip install --upgrade pip
+sudo -u random-chat /opt/random_chat/venv/bin/pip install -r /opt/random_chat/requirements.txt
 ```
 
 ## 4. Configure `.env`
@@ -74,8 +74,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 Create the configuration file:
 
 ```bash
-sudo install -m 600 -o realtime-chat -g realtime-chat /dev/null /opt/realtime_chat/.env
-sudoedit /opt/realtime_chat/.env
+sudo install -m 600 -o random-chat -g random-chat /dev/null /opt/random_chat/.env
+sudoedit /opt/random_chat/.env
 ```
 
 Add the generated key and the inactivity timeout in seconds:
@@ -94,7 +94,7 @@ clients must then reconnect with the new key.
 Open a new unit file:
 
 ```bash
-sudoedit /etc/systemd/system/realtime-chat.service
+sudoedit /etc/systemd/system/random-chat.service
 ```
 
 Paste the following configuration:
@@ -106,11 +106,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=realtime-chat
-Group=realtime-chat
-WorkingDirectory=/opt/realtime_chat
-EnvironmentFile=/opt/realtime_chat/.env
-ExecStart=/opt/realtime_chat/venv/bin/uvicorn random_chat:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
+User=random-chat
+Group=random-chat
+WorkingDirectory=/opt/random_chat
+EnvironmentFile=/opt/random_chat/.env
+ExecStart=/opt/random_chat/venv/bin/uvicorn random_chat:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -127,8 +127,8 @@ Load, enable, and start the service:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now realtime-chat
-sudo systemctl status realtime-chat
+sudo systemctl enable --now random-chat
+sudo systemctl status random-chat
 ```
 
 Test the application locally on the server, substituting the real key:
@@ -147,7 +147,7 @@ Expected response:
 If startup fails, inspect the logs:
 
 ```bash
-sudo journalctl -u realtime-chat -n 100 --no-pager
+sudo journalctl -u random-chat -n 100 --no-pager
 ```
 
 ## 6. Configure Nginx
@@ -155,7 +155,7 @@ sudo journalctl -u realtime-chat -n 100 --no-pager
 Create a virtual host:
 
 ```bash
-sudoedit /etc/nginx/sites-available/realtime-chat
+sudoedit /etc/nginx/sites-available/random-chat
 ```
 
 Paste this configuration and replace the domain:
@@ -200,7 +200,7 @@ server {
 Enable the site and verify the configuration:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/realtime-chat /etc/nginx/sites-enabled/realtime-chat
+sudo ln -s /etc/nginx/sites-available/random-chat /etc/nginx/sites-enabled/random-chat
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -291,17 +291,17 @@ The first received event should have `"type": "connected"`.
 Pull the new code, refresh dependencies, and restart the service:
 
 ```bash
-cd /opt/realtime_chat
-sudo -u realtime-chat git pull --ff-only
-sudo -u realtime-chat /opt/realtime_chat/venv/bin/pip install -r requirements.txt
-sudo systemctl restart realtime-chat
-sudo systemctl status realtime-chat
+cd /opt/random_chat
+sudo -u random-chat git pull --ff-only
+sudo -u random-chat /opt/random_chat/venv/bin/pip install -r requirements.txt
+sudo systemctl restart random-chat
+sudo systemctl status random-chat
 ```
 
 Check both application and proxy logs after an update:
 
 ```bash
-sudo journalctl -u realtime-chat -n 100 --no-pager
+sudo journalctl -u random-chat -n 100 --no-pager
 sudo tail -n 100 /var/log/nginx/error.log
 ```
 
