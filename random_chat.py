@@ -43,6 +43,7 @@ class User:
     age: int | None = None
     desired_gender: str = "any"
     desired_age_over: int = 0
+    desired_age_under: int = 121
     matched_peer_uuids: set[str] = field(default_factory=set, repr=False)
     active_pair_uuid: str | None = None
     websocket: WebSocket | None = field(default=None, repr=False)
@@ -142,6 +143,7 @@ def parse_profile(data: dict) -> tuple[dict[str, str | int] | None, str | None]:
     desired_gender = data.get("desired_gender")
     age = data.get("age")
     desired_age_over = data.get("desired_age_over")
+    desired_age_under = data.get("desired_age_under")
 
     if isinstance(gender, str):
         gender = gender.strip().lower()
@@ -160,12 +162,21 @@ def parse_profile(data: dict) -> tuple[dict[str, str | int] | None, str | None]:
         or not 0 <= desired_age_over < 120
     ):
         return None, "desired_age_over должен быть целым числом от 0 до 119"
+    if (
+        isinstance(desired_age_under, bool)
+        or not isinstance(desired_age_under, int)
+        or not 2 <= desired_age_under <= 121
+    ):
+        return None, "desired_age_under должен быть целым числом от 2 до 121"
+    if desired_age_over >= desired_age_under:
+        return None, "desired_age_over должен быть меньше desired_age_under"
 
     return {
         "gender": gender,
         "age": age,
         "desired_gender": desired_gender,
         "desired_age_over": desired_age_over,
+        "desired_age_under": desired_age_under,
     }, None
 
 
@@ -178,10 +189,12 @@ def profiles_are_compatible(first: User, second: User) -> bool:
     first_accepts_second = (
         first.desired_gender in {"any", second.gender}
         and second.age > first.desired_age_over
+        and second.age < first.desired_age_under
     )
     second_accepts_first = (
         second.desired_gender in {"any", first.gender}
         and first.age > second.desired_age_over
+        and first.age < second.desired_age_under
     )
     return first_accepts_second and second_accepts_first
 

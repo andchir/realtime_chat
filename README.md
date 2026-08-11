@@ -102,7 +102,8 @@ curl -X POST http://localhost:8000/api/connect \
     "gender": "male",
     "age": 28,
     "desired_gender": "female",
-    "desired_age_over": 24
+    "desired_age_over": 24,
+    "desired_age_under": 36
   }'
 ```
 
@@ -115,7 +116,8 @@ Response:
   "gender": "male",
   "age": 28,
   "desired_gender": "female",
-  "desired_age_over": 24
+  "desired_age_over": 24,
+  "desired_age_under": 36
 }
 ```
 
@@ -126,6 +128,11 @@ Profile fields are required:
 - `desired_gender`: `male`, `female`, or `any`;
 - `desired_age_over`: the interlocutor must be strictly older than this value.
   It accepts an integer from 0 to 119. For example, `24` means age 25 or older.
+- `desired_age_under`: the interlocutor must be strictly younger than this value.
+  It accepts an integer from 2 to 121. For example, `36` means age 35 or younger;
+  `121` allows every supported age up to 120.
+
+`desired_age_over` must be less than `desired_age_under`.
 
 The client can request a specific UUID:
 
@@ -138,7 +145,8 @@ curl -X POST http://localhost:8000/api/connect \
     "gender": "female",
     "age": 31,
     "desired_gender": "any",
-    "desired_age_over": 27
+    "desired_age_over": 27,
+    "desired_age_under": 41
   }'
 ```
 
@@ -181,11 +189,11 @@ curl "http://localhost:8000/api/random-peer?uuid=f79aaf1d-6c89-47ea-96e9-8e45ea1
 
 Only users with an active WebSocket connection and a complete profile participate
 in the selection. Preferences are mutual: each user must have the desired gender
-and be strictly older than the other user's `desired_age_over` value. The current
-user is excluded. The server also stores every selected pair in memory and does
-not return the same pair again in later random searches. Pair history is removed
-when either user expires from memory. If no new compatible user is available,
-`pair_uuid` is `null`:
+and their age must be strictly between the other user's `desired_age_over` and
+`desired_age_under` values. The current user is excluded. The server also stores
+every selected pair in memory and does not return the same pair again in later
+random searches. Pair history is removed when either user expires from memory.
+If no new compatible user is available, `pair_uuid` is `null`:
 
 ```json
 {

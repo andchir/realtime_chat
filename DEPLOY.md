@@ -260,7 +260,8 @@ curl -X POST https://chat.example.com/api/connect \
     "gender": "male",
     "age": 28,
     "desired_gender": "female",
-    "desired_age_over": 24
+    "desired_age_over": 24,
+    "desired_age_under": 36
   }'
 ```
 
