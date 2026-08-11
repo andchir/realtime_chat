@@ -98,7 +98,12 @@ Create a user with a generated UUID:
 curl -X POST http://localhost:8000/api/connect \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-long-random-secret" \
-  -d '{}'
+  -d '{
+    "gender": "male",
+    "age": 28,
+    "desired_gender": "female",
+    "desired_age_over": 24
+  }'
 ```
 
 Response:
@@ -106,9 +111,21 @@ Response:
 ```json
 {
   "uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
-  "requested_uuid_was_occupied": false
+  "requested_uuid_was_occupied": false,
+  "gender": "male",
+  "age": 28,
+  "desired_gender": "female",
+  "desired_age_over": 24
 }
 ```
+
+Profile fields are required:
+
+- `gender`: `male` or `female`;
+- `age`: the user's age from 1 to 120;
+- `desired_gender`: `male`, `female`, or `any`;
+- `desired_age_over`: the interlocutor must be strictly older than this value.
+  It accepts an integer from 0 to 119. For example, `24` means age 25 or older.
 
 The client can request a specific UUID:
 
@@ -116,7 +133,13 @@ The client can request a specific UUID:
 curl -X POST http://localhost:8000/api/connect \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-long-random-secret" \
-  -d '{"uuid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}'
+  -d '{
+    "uuid": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "gender": "female",
+    "age": 31,
+    "desired_gender": "any",
+    "desired_age_over": 27
+  }'
 ```
 
 If that UUID is already present in memory, the server creates and returns a new
@@ -156,15 +179,35 @@ curl "http://localhost:8000/api/random-peer?uuid=f79aaf1d-6c89-47ea-96e9-8e45ea1
   -H "X-API-Key: your-long-random-secret"
 ```
 
-Only users with an active WebSocket connection participate in the selection.
-The current user is excluded. If nobody is available, `peer_uuid` is `null`:
+Only users with an active WebSocket connection and a complete profile participate
+in the selection. Preferences are mutual: each user must have the desired gender
+and be strictly older than the other user's `desired_age_over` value. The current
+user is excluded. The server also stores every selected pair in memory and does
+not return the same pair again in later random searches. Pair history is removed
+when either user expires from memory. If no new compatible user is available,
+`pair_uuid` is `null`:
 
 ```json
 {
-  "peer_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "already_paired": false,
   "user_restored": false
 }
 ```
+
+The selected interlocutor receives the pair identifier through their WebSocket.
+The initiating user receives the same event as well as the HTTP response:
+
+```json
+{
+  "type": "paired",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4"
+}
+```
+
+The server never exposes one participant's UUID to the other. A user can belong
+to only one active pair. Calling the search route while already paired returns
+the current `pair_uuid` with `"already_paired": true`.
 
 ### Send and receive messages
 
@@ -172,21 +215,23 @@ Send the following JSON through the open WebSocket connection:
 
 ```json
 {
+  "type": "message",
   "user_uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
-  "peer_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "text": "Hello!"
 }
 ```
 
-`user_uuid` must match the UUID from the WebSocket URL. The recipient immediately
-receives the message through their open WebSocket connection:
+`user_uuid` must match the UUID from the WebSocket URL. `pair_uuid` must identify
+that user's active pair. The server resolves the recipient internally and rejects
+messages for missing, closed, or unrelated pairs. The recipient immediately
+receives the message without learning the sender UUID:
 
 ```json
 {
   "type": "message",
   "message_uuid": "b9344420-b7dd-4a67-8442-e6d5a2e430bf",
-  "user_uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
-  "peer_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "text": "Hello!"
 }
 ```
@@ -197,13 +242,40 @@ After successful delivery, the sender receives an acknowledgement:
 {
   "type": "message_sent",
   "message_uuid": "b9344420-b7dd-4a67-8442-e6d5a2e430bf",
-  "peer_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "user_restored": false
 }
 ```
 
-If the interlocutor is not connected, the sender receives an event with
+If the pair is no longer active, the sender receives an event with
 `"type": "error"`.
+
+### Leave a pair
+
+Send a `leave_pair` event to end the conversation and become available for a new
+search:
+
+```json
+{
+  "type": "leave_pair",
+  "user_uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4"
+}
+```
+
+The sender receives `pair_left`. The other participant receives:
+
+```json
+{
+  "type": "peer_disconnected",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "reason": "peer_left",
+  "message": "Собеседник завершил диалог"
+}
+```
+
+The same event with `"reason": "connection_closed"` is sent when the other
+participant's WebSocket disconnects.
 
 ### Get the number of users
 
@@ -216,9 +288,14 @@ Response:
 
 ```json
 {
-  "count": 2
+  "men": 1,
+  "women": 1,
+  "total": 2
 }
 ```
+
+`total` includes every user currently stored in memory. `men` and `women` count
+users by their profile gender.
 
 ### Inactivity timeout
 
@@ -229,6 +306,21 @@ when that user makes a new request or opens a WebSocket connection, the UUID is
 automatically added to the registry again. The `user_restored` response field
 indicates when this happened.
 
+If the timeout closes an active pair, both participants first receive this system
+event (when their socket is still reachable):
+
+```json
+{
+  "type": "system",
+  "event": "pair_timeout",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "message": "Пара закрыта из-за неактивности одного из собеседников"
+}
+```
+
+All user-facing system messages and WebSocket close reasons are in Russian.
+Machine-readable values such as `type`, `event`, and `reason` remain in English.
+
 ### API key errors
 
 All HTTP routes require the `X-API-Key` header. A missing or incorrect key
@@ -236,9 +328,12 @@ produces a `401 Unauthorized` response:
 
 ```json
 {
-  "error": "Invalid or missing API key"
+  "error": "Неверный или отсутствующий API-ключ"
 }
 ```
 
 The WebSocket endpoint rejects a handshake with close code `1008` when neither
 the header nor the query parameter contains the configured key.
+
+All API and WebSocket error descriptions are returned in Russian. HTTP status
+codes and machine-readable WebSocket event types remain unchanged.

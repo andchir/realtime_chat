@@ -141,7 +141,7 @@ curl http://127.0.0.1:8000/api/users/count \
 Expected response:
 
 ```json
-{"count":0}
+{"men":0,"women":0,"total":0}
 ```
 
 If startup fails, inspect the logs:
@@ -238,6 +238,11 @@ https://chat.example.com/api/random-peer?uuid=USER_UUID
 wss://chat.example.com/ws?uuid=USER_UUID&api_key=API_KEY
 ```
 
+`/api/random-peer` returns an opaque `pair_uuid`, not the other participant's
+UUID. Messages are routed through this active pair identifier. The second
+participant receives `pair_uuid` in a `paired` WebSocket event, and neither side
+learns the other's user UUID.
+
 Non-browser WebSocket clients should send `X-API-Key` as a handshake header
 instead of putting the key in the URL. Browser clients cannot add arbitrary
 WebSocket handshake headers, so they use the `api_key` query parameter and must
@@ -251,7 +256,12 @@ Create a user:
 curl -X POST https://chat.example.com/api/connect \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-generated-key" \
-  -d '{}'
+  -d '{
+    "gender": "male",
+    "age": 28,
+    "desired_gender": "female",
+    "desired_age_over": 24
+  }'
 ```
 
 Check the registry count:
@@ -311,3 +321,5 @@ reconnection and call `/api/connect` again when necessary.
   header when the client supports it.
 - Restrict `.env` to the service account (`chmod 600`) and rotate the key if it
   may have been exposed.
+- Message authorization is based on the active `pair_uuid`; knowing a user UUID
+  is not sufficient to send that user a message.

@@ -39,10 +39,37 @@ ENV_FILE = Path(__file__).with_name(".env")
 @dataclass
 class User:
     last_seen: float
+    gender: str | None = None
+    age: int | None = None
+    desired_gender: str = "any"
+    desired_age_over: int = 0
+    matched_peer_uuids: set[str] = field(default_factory=set, repr=False)
+    active_pair_uuid: str | None = None
     websocket: WebSocket | None = field(default=None, repr=False)
 
 
+@dataclass(frozen=True)
+class Pair:
+    first_user_uuid: str
+    second_user_uuid: str
+    created_at: float
+
+    def other_user_uuid(self, user_uuid: str) -> str | None:
+        if user_uuid == self.first_user_uuid:
+            return self.second_user_uuid
+        if user_uuid == self.second_user_uuid:
+            return self.first_user_uuid
+        return None
+
+
+@dataclass
+class CleanupActions:
+    expired_sockets: list[WebSocket] = field(default_factory=list)
+    timeout_notifications: list[tuple[WebSocket, str]] = field(default_factory=list)
+
+
 users: dict[str, User] = {}
+pairs: dict[str, Pair] = {}
 users_lock = asyncio.Lock()
 user_ttl_seconds = DEFAULT_USER_TTL_SECONDS
 
@@ -68,7 +95,7 @@ def configured_api_key() -> str:
     api_key = os.environ.get(API_KEY_ENV_NAME, "").strip()
     if not api_key:
         raise RuntimeError(
-            f"{API_KEY_ENV_NAME} is not configured. Add it to {ENV_FILE}."
+            f"{API_KEY_ENV_NAME} не настроен. Добавьте его в {ENV_FILE}."
         )
     return api_key
 
@@ -80,9 +107,13 @@ def configured_user_ttl_seconds() -> int:
     try:
         timeout = int(raw_value)
     except ValueError as exc:
-        raise RuntimeError(f"{USER_TTL_ENV_NAME} must be a positive integer") from exc
+        raise RuntimeError(
+            f"{USER_TTL_ENV_NAME} должен быть положительным целым числом"
+        ) from exc
     if timeout <= 0:
-        raise RuntimeError(f"{USER_TTL_ENV_NAME} must be a positive integer")
+        raise RuntimeError(
+            f"{USER_TTL_ENV_NAME} должен быть положительным целым числом"
+        )
     return timeout
 
 
@@ -93,7 +124,7 @@ def api_key_is_valid(candidate: str | None) -> bool:
 def authorize_http(request: Request) -> JSONResponse | None:
     if api_key_is_valid(request.headers.get("X-API-Key")):
         return None
-    return JSONResponse({"error": "Invalid or missing API key"}, status_code=401)
+    return JSONResponse({"error": "Неверный или отсутствующий API-ключ"}, status_code=401)
 
 
 def parse_uuid(value: object) -> str | None:
@@ -106,17 +137,102 @@ def parse_uuid(value: object) -> str | None:
         return None
 
 
-def remove_inactive_users(now: float) -> list[WebSocket]:
+def parse_profile(data: dict) -> tuple[dict[str, str | int] | None, str | None]:
+    gender = data.get("gender")
+    desired_gender = data.get("desired_gender")
+    age = data.get("age")
+    desired_age_over = data.get("desired_age_over")
+
+    if isinstance(gender, str):
+        gender = gender.strip().lower()
+    if isinstance(desired_gender, str):
+        desired_gender = desired_gender.strip().lower()
+
+    if gender not in {"male", "female"}:
+        return None, "gender должен быть 'male' или 'female'"
+    if desired_gender not in {"male", "female", "any"}:
+        return None, "desired_gender должен быть 'male', 'female' или 'any'"
+    if isinstance(age, bool) or not isinstance(age, int) or not 1 <= age <= 120:
+        return None, "age должен быть целым числом от 1 до 120"
+    if (
+        isinstance(desired_age_over, bool)
+        or not isinstance(desired_age_over, int)
+        or not 0 <= desired_age_over < 120
+    ):
+        return None, "desired_age_over должен быть целым числом от 0 до 119"
+
+    return {
+        "gender": gender,
+        "age": age,
+        "desired_gender": desired_gender,
+        "desired_age_over": desired_age_over,
+    }, None
+
+
+def profiles_are_compatible(first: User, second: User) -> bool:
+    """Return True when both users satisfy each other's preferences."""
+    if first.gender is None or first.age is None:
+        return False
+    if second.gender is None or second.age is None:
+        return False
+    first_accepts_second = (
+        first.desired_gender in {"any", second.gender}
+        and second.age > first.desired_age_over
+    )
+    second_accepts_first = (
+        second.desired_gender in {"any", first.gender}
+        and first.age > second.desired_age_over
+    )
+    return first_accepts_second and second_accepts_first
+
+
+def remove_inactive_users(now: float) -> CleanupActions:
     """Remove expired users. Caller must hold users_lock."""
     expired = [
         user_uuid
         for user_uuid, user in users.items()
         if now - user.last_seen > user_ttl_seconds
     ]
-    sockets = [users[user_uuid].websocket for user_uuid in expired]
+    actions = CleanupActions(
+        expired_sockets=[
+            users[user_uuid].websocket
+            for user_uuid in expired
+            if users[user_uuid].websocket is not None
+        ]
+    )
+    expired_set = set(expired)
+    for pair_uuid, pair in list(pairs.items()):
+        pair_users = {pair.first_user_uuid, pair.second_user_uuid}
+        if pair_users.isdisjoint(expired_set):
+            continue
+        del pairs[pair_uuid]
+        for participant_uuid in pair_users:
+            participant = users.get(participant_uuid)
+            if participant and participant.active_pair_uuid == pair_uuid:
+                participant.active_pair_uuid = None
+            if participant and participant.websocket is not None:
+                actions.timeout_notifications.append((participant.websocket, pair_uuid))
+
     for user_uuid in expired:
         del users[user_uuid]
-    return [socket for socket in sockets if socket is not None]
+    if expired:
+        for user in users.values():
+            user.matched_peer_uuids.difference_update(expired_set)
+    return actions
+
+
+def end_pair_locked(pair_uuid: str, departing_user_uuid: str) -> WebSocket | None:
+    """End a pair and return the other participant's socket for notification."""
+    pair = pairs.pop(pair_uuid, None)
+    if pair is None:
+        return None
+    other_user_uuid = pair.other_user_uuid(departing_user_uuid)
+    for participant_uuid in (pair.first_user_uuid, pair.second_user_uuid):
+        participant = users.get(participant_uuid)
+        if participant and participant.active_pair_uuid == pair_uuid:
+            participant.active_pair_uuid = None
+    other_user = users.get(other_user_uuid) if other_user_uuid else None
+    return other_user.websocket if other_user else None
 
 
 def touch_user(user_uuid: str, now: float) -> bool:
@@ -130,17 +246,35 @@ def touch_user(user_uuid: str, now: float) -> bool:
     return restored
 
 
+async def perform_cleanup_actions(actions: CleanupActions) -> None:
+    for socket, pair_uuid in actions.timeout_notifications:
+        with contextlib.suppress(Exception):
+            await socket.send_json(
+                {
+                    "type": "system",
+                    "event": "pair_timeout",
+                    "pair_uuid": pair_uuid,
+                    "message": "Пара закрыта из-за неактивности одного из собеседников",
+                }
+            )
+    for socket in actions.expired_sockets:
+        with contextlib.suppress(Exception):
+            await socket.close(
+                code=1000,
+                reason=f"Нет активности более {user_ttl_seconds} секунд",
+            )
+
+
+async def purge_inactive_users(now: float) -> None:
+    async with users_lock:
+        actions = remove_inactive_users(now)
+    await perform_cleanup_actions(actions)
+
+
 async def cleanup_loop() -> None:
     while True:
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
-        async with users_lock:
-            expired_sockets = remove_inactive_users(time.monotonic())
-        for socket in expired_sockets:
-            with contextlib.suppress(Exception):
-                await socket.close(
-                    code=1000,
-                    reason=f"Inactive for more than {user_ttl_seconds} seconds",
-                )
+        await purge_inactive_users(time.monotonic())
 
 
 @asynccontextmanager
@@ -163,9 +297,11 @@ async def read_json(request: Request) -> tuple[dict | None, JSONResponse | None]
     try:
         data = await request.json()
     except Exception:
-        return None, JSONResponse({"error": "Invalid JSON"}, status_code=400)
+        return None, JSONResponse({"error": "Некорректный JSON"}, status_code=400)
     if not isinstance(data, dict):
-        return None, JSONResponse({"error": "JSON body must be an object"}, status_code=400)
+        return None, JSONResponse(
+            {"error": "Тело JSON должно быть объектом"}, status_code=400
+        )
     return data, None
 
 
@@ -178,22 +314,31 @@ async def connect(request: Request) -> JSONResponse:
     if error:
         return error
 
+    profile, profile_error = parse_profile(data)
+    if profile_error:
+        return JSONResponse({"error": profile_error}, status_code=400)
+    assert profile is not None
+
     requested_value = data.get("uuid")
     requested_uuid = parse_uuid(requested_value) if requested_value is not None else None
     if requested_value is not None and requested_uuid is None:
-        return JSONResponse({"error": "Invalid uuid"}, status_code=400)
+        return JSONResponse({"error": "Некорректный UUID"}, status_code=400)
 
     now = time.monotonic()
+    await purge_inactive_users(now)
     async with users_lock:
-        remove_inactive_users(now)
         uuid_was_occupied = requested_uuid in users if requested_uuid else False
         user_uuid = str(uuid.uuid4()) if not requested_uuid or uuid_was_occupied else requested_uuid
         while user_uuid in users:
             user_uuid = str(uuid.uuid4())
-        users[user_uuid] = User(last_seen=now)
+        users[user_uuid] = User(last_seen=now, **profile)
 
     return JSONResponse(
-        {"uuid": user_uuid, "requested_uuid_was_occupied": uuid_was_occupied},
+        {
+            "uuid": user_uuid,
+            "requested_uuid_was_occupied": uuid_was_occupied,
+            **profile,
+        },
         status_code=201,
     )
 
@@ -202,10 +347,12 @@ async def connected_count(request: Request) -> JSONResponse:
     authorization_error = authorize_http(request)
     if authorization_error:
         return authorization_error
+    await purge_inactive_users(time.monotonic())
     async with users_lock:
-        remove_inactive_users(time.monotonic())
-        count = len(users)
-    return JSONResponse({"count": count})
+        men = sum(user.gender == "male" for user in users.values())
+        women = sum(user.gender == "female" for user in users.values())
+        total = len(users)
+    return JSONResponse({"men": men, "women": women, "total": total})
 
 
 async def random_peer(request: Request) -> JSONResponse:
@@ -214,47 +361,106 @@ async def random_peer(request: Request) -> JSONResponse:
         return authorization_error
     user_uuid = parse_uuid(request.query_params.get("uuid"))
     if user_uuid is None:
-        return JSONResponse({"error": "Valid uuid query parameter is required"}, status_code=400)
+        return JSONResponse(
+            {"error": "Требуется корректный параметр uuid"}, status_code=400
+        )
 
     now = time.monotonic()
+    await purge_inactive_users(now)
     async with users_lock:
-        remove_inactive_users(now)
         restored = touch_user(user_uuid, now)
+        current_user = users[user_uuid]
+        if current_user.gender is None or current_user.age is None:
+            return JSONResponse(
+                {"error": "Профиль пользователя отсутствует; подключитесь через /api/connect"},
+                status_code=409,
+            )
+        if current_user.websocket is None:
+            return JSONResponse(
+                {"error": "Перед поиском откройте WebSocket пользователя"},
+                status_code=409,
+            )
+        if current_user.active_pair_uuid is not None:
+            return JSONResponse(
+                {
+                    "pair_uuid": current_user.active_pair_uuid,
+                    "already_paired": True,
+                    "user_restored": restored,
+                }
+            )
         candidates = [
             candidate
             for candidate, user in users.items()
-            if candidate != user_uuid and user.websocket is not None
+            if candidate != user_uuid
+            and user.websocket is not None
+            and user.active_pair_uuid is None
+            and candidate not in current_user.matched_peer_uuids
+            and user_uuid not in user.matched_peer_uuids
+            and profiles_are_compatible(current_user, user)
         ]
         peer_uuid = random.choice(candidates) if candidates else None
+        if peer_uuid is None:
+            return JSONResponse({"pair_uuid": None, "user_restored": restored})
 
-    return JSONResponse({"peer_uuid": peer_uuid, "user_restored": restored})
+        pair_uuid = str(uuid.uuid4())
+        peer = users[peer_uuid]
+        pairs[pair_uuid] = Pair(
+            first_user_uuid=user_uuid,
+            second_user_uuid=peer_uuid,
+            created_at=now,
+        )
+        current_user.active_pair_uuid = pair_uuid
+        peer.active_pair_uuid = pair_uuid
+        current_user.matched_peer_uuids.add(peer_uuid)
+        peer.matched_peer_uuids.add(user_uuid)
+        current_socket = current_user.websocket
+        peer_socket = peer.websocket
+
+    pair_event = {"type": "paired", "pair_uuid": pair_uuid}
+    try:
+        await peer_socket.send_json(pair_event)
+    except Exception:
+        async with users_lock:
+            peer = users.get(peer_uuid)
+            if peer and peer.websocket is peer_socket:
+                peer.websocket = None
+            end_pair_locked(pair_uuid, peer_uuid)
+        return JSONResponse({"error": "Выбранный собеседник отключился"}, status_code=409)
+
+    if current_socket is not None:
+        with contextlib.suppress(Exception):
+            await current_socket.send_json(pair_event)
+
+    return JSONResponse(
+        {"pair_uuid": pair_uuid, "already_paired": False, "user_restored": restored}
+    )
 
 
 async def websocket_chat(websocket: WebSocket) -> None:
-    """Register a socket and relay messages to another connected UUID."""
+    """Register a socket and relay messages only within an active pair."""
     supplied_api_key = websocket.headers.get("X-API-Key") or websocket.query_params.get(
         "api_key"
     )
     if not api_key_is_valid(supplied_api_key):
-        await websocket.close(code=1008, reason="Invalid or missing API key")
+        await websocket.close(code=1008, reason="Неверный или отсутствующий API-ключ")
         return
 
     user_uuid = parse_uuid(websocket.query_params.get("uuid"))
     if user_uuid is None:
-        await websocket.close(code=1008, reason="Valid uuid query parameter is required")
+        await websocket.close(code=1008, reason="Требуется корректный UUID пользователя")
         return
 
     await websocket.accept()
     now = time.monotonic()
+    await purge_inactive_users(now)
     async with users_lock:
-        remove_inactive_users(now)
         restored = touch_user(user_uuid, now)
         previous_socket = users[user_uuid].websocket
         users[user_uuid].websocket = websocket
 
     if previous_socket is not None and previous_socket is not websocket:
         with contextlib.suppress(Exception):
-            await previous_socket.close(code=1000, reason="Replaced by a new connection")
+            await previous_socket.close(code=1000, reason="Соединение заменено новым")
 
     await websocket.send_json(
         {"type": "connected", "uuid": user_uuid, "user_restored": restored}
@@ -265,39 +471,108 @@ async def websocket_chat(websocket: WebSocket) -> None:
             try:
                 data = await websocket.receive_json()
             except (ValueError, TypeError):
-                await websocket.send_json({"type": "error", "error": "Invalid JSON"})
+                await websocket.send_json({"type": "error", "error": "Некорректный JSON"})
                 continue
 
-            request_user_uuid = parse_uuid(data.get("user_uuid")) if isinstance(data, dict) else None
-            peer_uuid = parse_uuid(data.get("peer_uuid")) if isinstance(data, dict) else None
-            text = data.get("text") if isinstance(data, dict) else None
+            request_user_uuid = (
+                parse_uuid(data.get("user_uuid")) if isinstance(data, dict) else None
+            )
+            event_type = data.get("type", "message") if isinstance(data, dict) else None
+            pair_uuid = parse_uuid(data.get("pair_uuid")) if isinstance(data, dict) else None
 
             if request_user_uuid != user_uuid:
                 await websocket.send_json(
-                    {"type": "error", "error": "user_uuid must match the socket uuid"}
+                    {
+                        "type": "error",
+                        "error": "user_uuid должен совпадать с UUID WebSocket-соединения",
+                    }
                 )
                 continue
-            if peer_uuid is None:
-                await websocket.send_json({"type": "error", "error": "Valid peer_uuid is required"})
-                continue
-            if not isinstance(text, str) or not text.strip():
-                await websocket.send_json({"type": "error", "error": "Non-empty text is required"})
+            if pair_uuid is None:
+                await websocket.send_json(
+                    {"type": "error", "error": "Требуется корректный pair_uuid"}
+                )
                 continue
 
             now = time.monotonic()
+            await purge_inactive_users(now)
+
+            if event_type == "leave_pair":
+                async with users_lock:
+                    message_restored = touch_user(user_uuid, now)
+                    users[user_uuid].websocket = websocket
+                    user = users[user_uuid]
+                    if user.active_pair_uuid != pair_uuid or pair_uuid not in pairs:
+                        partner_socket = None
+                        pair_was_active = False
+                    else:
+                        partner_socket = end_pair_locked(pair_uuid, user_uuid)
+                        pair_was_active = True
+
+                if not pair_was_active:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "error": "Пара неактивна",
+                            "pair_uuid": pair_uuid,
+                        }
+                    )
+                    continue
+                if partner_socket is not None:
+                    with contextlib.suppress(Exception):
+                        await partner_socket.send_json(
+                            {
+                                "type": "peer_disconnected",
+                                "pair_uuid": pair_uuid,
+                                "reason": "peer_left",
+                                "message": "Собеседник завершил диалог",
+                            }
+                        )
+                await websocket.send_json(
+                    {
+                        "type": "pair_left",
+                        "pair_uuid": pair_uuid,
+                        "user_restored": message_restored,
+                    }
+                )
+                continue
+
+            if event_type != "message":
+                await websocket.send_json(
+                    {"type": "error", "error": "Неподдерживаемый тип события"}
+                )
+                continue
+
+            text = data.get("text") if isinstance(data, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                await websocket.send_json(
+                    {"type": "error", "error": "Требуется непустой текст сообщения"}
+                )
+                continue
+
             async with users_lock:
-                remove_inactive_users(now)
                 message_restored = touch_user(user_uuid, now)
                 users[user_uuid].websocket = websocket
-                peer = users.get(peer_uuid)
-                target_socket = peer.websocket if peer else None
+                user = users[user_uuid]
+                pair = pairs.get(pair_uuid)
+                other_user_uuid = pair.other_user_uuid(user_uuid) if pair else None
+                other_user = users.get(other_user_uuid) if other_user_uuid else None
+                pair_is_active = bool(
+                    pair
+                    and user.active_pair_uuid == pair_uuid
+                    and other_user
+                    and other_user.active_pair_uuid == pair_uuid
+                )
+                target_socket = other_user.websocket if pair_is_active and other_user else None
+                if pair_is_active and target_socket is None:
+                    end_pair_locked(pair_uuid, user_uuid)
 
             if target_socket is None:
                 await websocket.send_json(
                     {
                         "type": "error",
-                        "error": "Peer is not connected",
-                        "peer_uuid": peer_uuid,
+                        "error": "Пара неактивна",
+                        "pair_uuid": pair_uuid,
                         "user_restored": message_restored,
                     }
                 )
@@ -309,18 +584,24 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     {
                         "type": "message",
                         "message_uuid": message_uuid,
-                        "user_uuid": user_uuid,
-                        "peer_uuid": peer_uuid,
+                        "pair_uuid": pair_uuid,
                         "text": text,
                     }
                 )
             except Exception:
                 async with users_lock:
-                    peer = users.get(peer_uuid)
-                    if peer and peer.websocket is target_socket:
-                        peer.websocket = None
+                    pair = pairs.get(pair_uuid)
+                    other_user_uuid = pair.other_user_uuid(user_uuid) if pair else None
+                    other_user = users.get(other_user_uuid) if other_user_uuid else None
+                    if other_user and other_user.websocket is target_socket:
+                        other_user.websocket = None
+                    end_pair_locked(pair_uuid, user_uuid)
                 await websocket.send_json(
-                    {"type": "error", "error": "Peer connection is unavailable", "peer_uuid": peer_uuid}
+                    {
+                        "type": "error",
+                        "error": "Соединение с парой недоступно",
+                        "pair_uuid": pair_uuid,
+                    }
                 )
                 continue
 
@@ -328,17 +609,34 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 {
                     "type": "message_sent",
                     "message_uuid": message_uuid,
-                    "peer_uuid": peer_uuid,
+                    "pair_uuid": pair_uuid,
                     "user_restored": message_restored,
                 }
             )
     except WebSocketDisconnect:
         pass
     finally:
+        partner_socket = None
+        disconnected_pair_uuid = None
         async with users_lock:
             user = users.get(user_uuid)
             if user and user.websocket is websocket:
                 user.websocket = None
+                disconnected_pair_uuid = user.active_pair_uuid
+                if disconnected_pair_uuid is not None:
+                    partner_socket = end_pair_locked(
+                        disconnected_pair_uuid, user_uuid
+                    )
+        if partner_socket is not None and disconnected_pair_uuid is not None:
+            with contextlib.suppress(Exception):
+                await partner_socket.send_json(
+                    {
+                        "type": "peer_disconnected",
+                        "pair_uuid": disconnected_pair_uuid,
+                        "reason": "connection_closed",
+                        "message": "Соединение с собеседником разорвано",
+                    }
+                )
 
 
 routes = [
