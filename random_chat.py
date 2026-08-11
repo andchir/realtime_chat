@@ -159,25 +159,25 @@ def parse_profile(data: dict) -> tuple[dict[str, str | int] | None, str | None]:
         desired_gender = desired_gender.strip().lower()
 
     if gender not in {"male", "female"}:
-        return None, "gender должен быть 'male' или 'female'"
+        return None, "Пол должен быть 'male' или 'female'"
     if desired_gender not in {"male", "female", "any"}:
-        return None, "desired_gender должен быть 'male', 'female' или 'any'"
+        return None, "Пол собеседника должен быть 'male', 'female' или 'any'"
     if isinstance(age, bool) or not isinstance(age, int) or not 1 <= age <= 120:
-        return None, "age должен быть целым числом от 1 до 120"
+        return None, "Возраст должен быть целым числом от 1 до 120"
     if (
         isinstance(desired_age_over, bool)
         or not isinstance(desired_age_over, int)
         or not 0 <= desired_age_over < 120
     ):
-        return None, "desired_age_over должен быть целым числом от 0 до 119"
+        return None, "Возраст собеседника должен быть целым числом от 0 до 119"
     if (
         isinstance(desired_age_under, bool)
         or not isinstance(desired_age_under, int)
         or not 2 <= desired_age_under <= 121
     ):
-        return None, "desired_age_under должен быть целым числом от 2 до 121"
+        return None, "Возраст собеседника должен быть целым числом от 2 до 121"
     if desired_age_over >= desired_age_under:
-        return None, "desired_age_over должен быть меньше desired_age_under"
+        return None, "Некорректные пределы возраста собеседника"
 
     return {
         "gender": gender,
