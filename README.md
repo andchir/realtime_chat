@@ -224,13 +224,12 @@ Send the following JSON through the open WebSocket connection:
 ```json
 {
   "type": "message",
-  "user_uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "text": "Hello!"
 }
 ```
 
-`user_uuid` must match the UUID from the WebSocket URL. `pair_uuid` must identify
+The server takes the sender UUID from the WebSocket URL. `pair_uuid` must identify
 that user's active pair. The server resolves the recipient internally and rejects
 messages for missing, closed, or unrelated pairs. The recipient immediately
 receives the message without learning the sender UUID:
@@ -266,7 +265,6 @@ search:
 ```json
 {
   "type": "leave_pair",
-  "user_uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4"
 }
 ```

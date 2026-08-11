@@ -495,20 +495,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "error", "error": "Некорректный JSON"})
                 continue
 
-            request_user_uuid = (
-                parse_uuid(data.get("user_uuid")) if isinstance(data, dict) else None
-            )
             event_type = data.get("type", "message") if isinstance(data, dict) else None
             pair_uuid = parse_uuid(data.get("pair_uuid")) if isinstance(data, dict) else None
 
-            if request_user_uuid != user_uuid:
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "error": "user_uuid должен совпадать с UUID WebSocket-соединения",
-                    }
-                )
-                continue
             if pair_uuid is None:
                 await websocket.send_json(
                     {"type": "error", "error": "Требуется корректный pair_uuid"}
