@@ -1,6 +1,7 @@
 venv/
 env/
 .venv/
+.env
 .env/
 
 __pycache__/
@@ -19,4 +20,3 @@ build/
 
 .DS_Store
 Thumbs.db
-
