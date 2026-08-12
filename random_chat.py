@@ -602,6 +602,7 @@ async def leave_pair(request: Request) -> JSONResponse:
                     "type": "peer_disconnected",
                     "pair_uuid": pair_uuid,
                     "message": "Собеседник завершил диалог",
+                    "text": "[Собеседник завершил диалог]",
                 }
             )
 
@@ -710,6 +711,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                                 "type": "peer_disconnected",
                                 "pair_uuid": pair_uuid,
                                 "message": "Собеседник завершил диалог",
+                                "text": "[Собеседник завершил диалог]",
                             }
                         )
                 await websocket.send_json(
@@ -796,6 +798,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         "status": "connected",
                         "type": "error",
                         "error": "Соединение с парой недоступно",
+                        "text": "[Соединение с парой недоступно]",
                         "pair_uuid": pair_uuid,
                     }
                 )
@@ -832,6 +835,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         "type": "peer_disconnected",
                         "pair_uuid": disconnected_pair_uuid,
                         "message": "Соединение с собеседником разорвано",
+                        "text": "[Соединение с собеседником разорвано]",
                     }
                 )
 
