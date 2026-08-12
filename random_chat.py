@@ -125,7 +125,13 @@ def api_key_is_valid(candidate: str | None) -> bool:
 def authorize_http(request: Request) -> JSONResponse | None:
     if api_key_is_valid(request.headers.get("X-API-Key")):
         return None
-    return JSONResponse({"error": "Неверный или отсутствующий API-ключ"}, status_code=401)
+    return JSONResponse(
+        {
+            "status": "unauthorized",
+            "error": "Неверный или отсутствующий API-ключ",
+        },
+        status_code=401,
+    )
 
 
 def parse_uuid(value: object) -> str | None:
@@ -272,6 +278,7 @@ async def perform_cleanup_actions(actions: CleanupActions) -> None:
         with contextlib.suppress(Exception):
             await socket.send_json(
                 {
+                    "status": "pair_timeout",
                     "type": "system",
                     "event": "pair_timeout",
                     "pair_uuid": pair_uuid,
@@ -318,10 +325,17 @@ async def read_json(request: Request) -> tuple[dict | None, JSONResponse | None]
     try:
         data = await request.json()
     except Exception:
-        return None, JSONResponse({"error": "Некорректный JSON"}, status_code=400)
+        return None, JSONResponse(
+            {"status": "invalid_json", "error": "Некорректный JSON"},
+            status_code=400,
+        )
     if not isinstance(data, dict):
         return None, JSONResponse(
-            {"error": "Тело JSON должно быть объектом"}, status_code=400
+            {
+                "status": "invalid_body",
+                "error": "Тело JSON должно быть объектом",
+            },
+            status_code=400,
         )
     return data, None
 
@@ -337,13 +351,19 @@ async def connect(request: Request) -> JSONResponse:
 
     profile, profile_error = parse_profile(data)
     if profile_error:
-        return JSONResponse({"error": profile_error}, status_code=400)
+        return JSONResponse(
+            {"status": "invalid_profile", "error": profile_error},
+            status_code=400,
+        )
     assert profile is not None
 
     requested_value = data.get("uuid")
     requested_uuid = parse_uuid(requested_value) if requested_value is not None else None
     if requested_value is not None and requested_uuid is None:
-        return JSONResponse({"error": "Некорректный UUID"}, status_code=400)
+        return JSONResponse(
+            {"status": "invalid_uuid", "error": "Некорректный UUID"},
+            status_code=400,
+        )
 
     now = time.monotonic()
     await purge_inactive_users(now)
@@ -356,6 +376,7 @@ async def connect(request: Request) -> JSONResponse:
 
     return JSONResponse(
         {
+            "status": "success",
             "uuid": user_uuid,
             "requested_uuid_was_occupied": uuid_was_occupied,
             **profile,
@@ -373,7 +394,9 @@ async def connected_count(request: Request) -> JSONResponse:
         men = sum(user.gender == "male" for user in users.values())
         women = sum(user.gender == "female" for user in users.values())
         total = len(users)
-    return JSONResponse({"men": men, "women": women, "total": total})
+    return JSONResponse(
+        {"status": "success", "men": men, "women": women, "total": total}
+    )
 
 
 async def random_peer(request: Request) -> JSONResponse:
@@ -460,7 +483,7 @@ async def random_peer(request: Request) -> JSONResponse:
         current_socket = current_user.websocket
         peer_socket = peer.websocket
 
-    pair_event = {"type": "paired", "pair_uuid": pair_uuid}
+    pair_event = {"status": "success", "type": "paired", "pair_uuid": pair_uuid}
     try:
         await peer_socket.send_json(pair_event)
     except Exception:
@@ -549,9 +572,9 @@ async def leave_pair(request: Request) -> JSONResponse:
         with contextlib.suppress(Exception):
             await partner_socket.send_json(
                 {
+                    "status": "peer_disconnected",
                     "type": "peer_disconnected",
                     "pair_uuid": pair_uuid,
-                    "reason": "peer_left",
                     "message": "Собеседник завершил диалог",
                 }
             )
@@ -592,7 +615,12 @@ async def websocket_chat(websocket: WebSocket) -> None:
             await previous_socket.close(code=1000, reason="Соединение заменено новым")
 
     await websocket.send_json(
-        {"type": "connected", "uuid": user_uuid, "user_restored": restored}
+        {
+            "status": "success",
+            "type": "connected",
+            "uuid": user_uuid,
+            "user_restored": restored,
+        }
     )
 
     try:
@@ -600,7 +628,13 @@ async def websocket_chat(websocket: WebSocket) -> None:
             try:
                 data = await websocket.receive_json()
             except (ValueError, TypeError):
-                await websocket.send_json({"type": "error", "error": "Некорректный JSON"})
+                await websocket.send_json(
+                    {
+                        "status": "invalid_json",
+                        "type": "error",
+                        "error": "Некорректный JSON",
+                    }
+                )
                 continue
 
             event_type = data.get("type", "message") if isinstance(data, dict) else None
@@ -608,7 +642,11 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             if pair_uuid is None:
                 await websocket.send_json(
-                    {"type": "error", "error": "Требуется корректный pair_uuid"}
+                    {
+                        "status": "invalid_pair_uuid",
+                        "type": "error",
+                        "error": "Требуется корректный pair_uuid",
+                    }
                 )
                 continue
 
@@ -630,6 +668,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 if not pair_was_active:
                     await websocket.send_json(
                         {
+                            "status": "pair_not_active",
                             "type": "error",
                             "error": "Пара неактивна",
                             "pair_uuid": pair_uuid,
@@ -640,14 +679,15 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     with contextlib.suppress(Exception):
                         await partner_socket.send_json(
                             {
+                                "status": "peer_disconnected",
                                 "type": "peer_disconnected",
                                 "pair_uuid": pair_uuid,
-                                "reason": "peer_left",
                                 "message": "Собеседник завершил диалог",
                             }
                         )
                 await websocket.send_json(
                     {
+                        "status": "success",
                         "type": "pair_left",
                         "pair_uuid": pair_uuid,
                         "user_restored": message_restored,
@@ -657,14 +697,22 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             if event_type != "message":
                 await websocket.send_json(
-                    {"type": "error", "error": "Неподдерживаемый тип события"}
+                    {
+                        "status": "unsupported_event_type",
+                        "type": "error",
+                        "error": "Неподдерживаемый тип события",
+                    }
                 )
                 continue
 
             text = data.get("text") if isinstance(data, dict) else None
             if not isinstance(text, str) or not text.strip():
                 await websocket.send_json(
-                    {"type": "error", "error": "Требуется непустой текст сообщения"}
+                    {
+                        "status": "invalid_message",
+                        "type": "error",
+                        "error": "Требуется непустой текст сообщения",
+                    }
                 )
                 continue
 
@@ -688,6 +736,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
             if target_socket is None:
                 await websocket.send_json(
                     {
+                        "status": "pair_not_active",
                         "type": "error",
                         "error": "Пара неактивна",
                         "pair_uuid": pair_uuid,
@@ -700,6 +749,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
             try:
                 await target_socket.send_json(
                     {
+                        "status": "success",
                         "type": "message",
                         "message_uuid": message_uuid,
                         "pair_uuid": pair_uuid,
@@ -716,6 +766,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                     end_pair_locked(pair_uuid, user_uuid)
                 await websocket.send_json(
                     {
+                        "status": "peer_disconnected",
                         "type": "error",
                         "error": "Соединение с парой недоступно",
                         "pair_uuid": pair_uuid,
@@ -725,6 +776,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             await websocket.send_json(
                 {
+                    "status": "success",
                     "type": "message_sent",
                     "message_uuid": message_uuid,
                     "pair_uuid": pair_uuid,
@@ -749,9 +801,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
             with contextlib.suppress(Exception):
                 await partner_socket.send_json(
                     {
+                        "status": "peer_disconnected",
                         "type": "peer_disconnected",
                         "pair_uuid": disconnected_pair_uuid,
-                        "reason": "connection_closed",
                         "message": "Соединение с собеседником разорвано",
                     }
                 )

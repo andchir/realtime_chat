@@ -111,6 +111,7 @@ Response:
 
 ```json
 {
+  "status": "success",
   "uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
   "requested_uuid_was_occupied": false,
   "gender": "male",
@@ -171,6 +172,7 @@ The server confirms the connection:
 
 ```json
 {
+  "status": "success",
   "type": "connected",
   "uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
   "user_restored": false
@@ -197,6 +199,7 @@ If no new compatible user is available, `pair_uuid` is `null`:
 
 ```json
 {
+  "status": "success",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "already_paired": false,
   "user_restored": false
@@ -208,6 +211,7 @@ The initiating user receives the same event as well as the HTTP response:
 
 ```json
 {
+  "status": "success",
   "type": "paired",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4"
 }
@@ -223,6 +227,7 @@ Send the following JSON through the open WebSocket connection:
 
 ```json
 {
+  "status": "success",
   "type": "message",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "text": "Hello!"
@@ -247,6 +252,7 @@ After successful delivery, the sender receives an acknowledgement:
 
 ```json
 {
+  "status": "success",
   "type": "message_sent",
   "message_uuid": "b9344420-b7dd-4a67-8442-e6d5a2e430bf",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
