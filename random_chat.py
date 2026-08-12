@@ -379,11 +379,21 @@ async def connected_count(request: Request) -> JSONResponse:
 async def random_peer(request: Request) -> JSONResponse:
     authorization_error = authorize_http(request)
     if authorization_error:
-        return authorization_error
+        return JSONResponse(
+            {
+                "status": "unauthorized",
+                "error": "Неверный или отсутствующий API-ключ",
+            },
+            status_code=401,
+        )
     user_uuid = parse_uuid(request.query_params.get("uuid"))
     if user_uuid is None:
         return JSONResponse(
-            {"error": "Требуется корректный параметр uuid"}, status_code=400
+            {
+                "status": "invalid_uuid",
+                "error": "Требуется корректный параметр uuid",
+            },
+            status_code=400,
         )
 
     now = time.monotonic()
@@ -393,17 +403,24 @@ async def random_peer(request: Request) -> JSONResponse:
         current_user = users[user_uuid]
         if current_user.gender is None or current_user.age is None:
             return JSONResponse(
-                {"error": "Профиль пользователя отсутствует; подключитесь через /api/connect"},
+                {
+                    "status": "profile_missing",
+                    "error": "Профиль пользователя отсутствует; подключитесь через /api/connect",
+                },
                 status_code=409,
             )
         if current_user.websocket is None:
             return JSONResponse(
-                {"error": "Перед поиском откройте WebSocket пользователя"},
+                {
+                    "status": "websocket_not_connected",
+                    "error": "Перед поиском откройте WebSocket пользователя",
+                },
                 status_code=409,
             )
         if current_user.active_pair_uuid is not None:
             return JSONResponse(
                 {
+                    "status": "success",
                     "pair_uuid": current_user.active_pair_uuid,
                     "already_paired": True,
                     "user_restored": restored,
@@ -421,7 +438,13 @@ async def random_peer(request: Request) -> JSONResponse:
         ]
         peer_uuid = random.choice(candidates) if candidates else None
         if peer_uuid is None:
-            return JSONResponse({"pair_uuid": None, "user_restored": restored})
+            return JSONResponse(
+                {
+                    "status": "not_found",
+                    "pair_uuid": None,
+                    "user_restored": restored,
+                }
+            )
 
         pair_uuid = str(uuid.uuid4())
         peer = users[peer_uuid]
@@ -446,14 +469,25 @@ async def random_peer(request: Request) -> JSONResponse:
             if peer and peer.websocket is peer_socket:
                 peer.websocket = None
             end_pair_locked(pair_uuid, peer_uuid)
-        return JSONResponse({"error": "Выбранный собеседник отключился"}, status_code=409)
+        return JSONResponse(
+            {
+                "status": "peer_disconnected",
+                "error": "Выбранный собеседник отключился",
+            },
+            status_code=409,
+        )
 
     if current_socket is not None:
         with contextlib.suppress(Exception):
             await current_socket.send_json(pair_event)
 
     return JSONResponse(
-        {"pair_uuid": pair_uuid, "already_paired": False, "user_restored": restored}
+        {
+            "status": "success",
+            "pair_uuid": pair_uuid,
+            "already_paired": False,
+            "user_restored": restored,
+        }
     )
 
 
