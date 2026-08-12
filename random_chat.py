@@ -491,6 +491,80 @@ async def random_peer(request: Request) -> JSONResponse:
     )
 
 
+async def leave_pair(request: Request) -> JSONResponse:
+    """End the user's active dialog and notify the other participant."""
+    authorization_error = authorize_http(request)
+    if authorization_error:
+        return authorization_error
+
+    data, error = await read_json(request)
+    if error:
+        return error
+    assert data is not None
+
+    user_uuid = parse_uuid(data.get("uuid"))
+    if user_uuid is None:
+        return JSONResponse(
+            {"status": "invalid_uuid", "error": "Требуется корректный uuid"},
+            status_code=400,
+        )
+
+    pair_uuid = parse_uuid(data.get("pair_uuid"))
+    if pair_uuid is None:
+        return JSONResponse(
+            {
+                "status": "invalid_pair_uuid",
+                "error": "Требуется корректный pair_uuid",
+            },
+            status_code=400,
+        )
+
+    now = time.monotonic()
+    await purge_inactive_users(now)
+    async with users_lock:
+        user = users.get(user_uuid)
+        pair_is_active = bool(
+            user
+            and user.active_pair_uuid == pair_uuid
+            and pair_uuid in pairs
+            and pairs[pair_uuid].other_user_uuid(user_uuid) is not None
+        )
+        if pair_is_active:
+            user.last_seen = now
+            partner_socket = end_pair_locked(pair_uuid, user_uuid)
+        else:
+            partner_socket = None
+
+    if not pair_is_active:
+        return JSONResponse(
+            {
+                "status": "pair_not_active",
+                "error": "Пара неактивна",
+                "pair_uuid": pair_uuid,
+            },
+            status_code=409,
+        )
+
+    if partner_socket is not None:
+        with contextlib.suppress(Exception):
+            await partner_socket.send_json(
+                {
+                    "type": "peer_disconnected",
+                    "pair_uuid": pair_uuid,
+                    "reason": "peer_left",
+                    "message": "Собеседник завершил диалог",
+                }
+            )
+
+    return JSONResponse(
+        {
+            "status": "success",
+            "pair_uuid": pair_uuid,
+            "dialog_ended": True,
+        }
+    )
+
+
 async def websocket_chat(websocket: WebSocket) -> None:
     """Register a socket and relay messages only within an active pair."""
     supplied_api_key = websocket.headers.get("X-API-Key") or websocket.query_params.get(
@@ -687,6 +761,7 @@ routes = [
     Route("/api/connect", connect, methods=["POST"]),
     Route("/api/users/count", connected_count, methods=["GET"]),
     Route("/api/random-peer", random_peer, methods=["GET"]),
+    Route("/api/leave-pair", leave_pair, methods=["POST"]),
     WebSocketRoute("/ws", websocket_chat),
 ]
 

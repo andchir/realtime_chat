@@ -259,8 +259,29 @@ If the pair is no longer active, the sender receives an event with
 
 ### Leave a pair
 
-Send a `leave_pair` event to end the conversation and become available for a new
-search:
+The conversation can be ended through a separate HTTP route:
+
+```bash
+curl -X POST http://localhost:8000/api/leave-pair \
+  -H "X-API-Key: your-long-random-secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
+    "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4"
+  }'
+```
+
+Both users become available for a new search. The response is:
+
+```json
+{
+  "status": "success",
+  "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
+  "dialog_ended": true
+}
+```
+
+Alternatively, send a `leave_pair` event through the WebSocket:
 
 ```json
 {
