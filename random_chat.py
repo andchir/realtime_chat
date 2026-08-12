@@ -405,7 +405,7 @@ async def random_peer(request: Request) -> JSONResponse:
             return JSONResponse(
                 {
                     "status": "profile_missing",
-                    "error": "Профиль пользователя отсутствует; подключитесь через /api/connect",
+                    "error": "Профиль пользователя отсутствует. Необходимо подключение.",
                 },
                 status_code=409,
             )
