@@ -87,6 +87,11 @@ python random_chat.py
 
 By default, the server is available at `http://localhost:8000`.
 
+Every JSON response contains the user's current `status`: `disconnected` when
+the user is not registered, `connected` when available outside a dialog, and
+`paired` while an active pair exists. Operation details are returned separately
+in fields such as `type`, `error`, or `reason`.
+
 For an Ubuntu production deployment with systemd, Nginx, HTTPS, and WSS, see
 [DEPLOY.md](DEPLOY.md).
 
@@ -111,7 +116,7 @@ Response:
 
 ```json
 {
-  "status": "success",
+  "status": "connected",
   "uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
   "requested_uuid_was_occupied": false,
   "gender": "male",
@@ -172,7 +177,7 @@ The server confirms the connection:
 
 ```json
 {
-  "status": "success",
+  "status": "connected",
   "type": "connected",
   "uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
   "user_restored": false
@@ -199,7 +204,7 @@ If no new compatible user is available, `pair_uuid` is `null`:
 
 ```json
 {
-  "status": "success",
+  "status": "paired",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "already_paired": false,
   "user_restored": false
@@ -211,7 +216,7 @@ The initiating user receives the same event as well as the HTTP response:
 
 ```json
 {
-  "status": "success",
+  "status": "paired",
   "type": "paired",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4"
 }
@@ -227,7 +232,7 @@ Send the following JSON through the open WebSocket connection:
 
 ```json
 {
-  "status": "success",
+  "status": "paired",
   "type": "message",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "text": "Hello!"
@@ -252,7 +257,7 @@ After successful delivery, the sender receives an acknowledgement:
 
 ```json
 {
-  "status": "success",
+  "status": "paired",
   "type": "message_sent",
   "message_uuid": "b9344420-b7dd-4a67-8442-e6d5a2e430bf",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
@@ -281,7 +286,7 @@ Both users become available for a new search. The response is:
 
 ```json
 {
-  "status": "success",
+  "status": "connected",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
   "dialog_ended": true
 }
@@ -300,15 +305,14 @@ The sender receives `pair_left`. The other participant receives:
 
 ```json
 {
+  "status": "connected",
   "type": "peer_disconnected",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
-  "reason": "peer_left",
   "message": "Собеседник завершил диалог"
 }
 ```
 
-The same event with `"reason": "connection_closed"` is sent when the other
-participant's WebSocket disconnects.
+The same event is sent when the other participant's WebSocket disconnects.
 
 ### Get the number of users
 
@@ -321,6 +325,7 @@ Response:
 
 ```json
 {
+  "status": "connected",
   "men": 1,
   "women": 1,
   "total": 2
@@ -344,6 +349,7 @@ event (when their socket is still reachable):
 
 ```json
 {
+  "status": "connected",
   "type": "system",
   "event": "pair_timeout",
   "pair_uuid": "29c1e07b-bfc1-4fe6-ae8b-c907309e8df4",
@@ -352,7 +358,7 @@ event (when their socket is still reachable):
 ```
 
 All user-facing system messages and WebSocket close reasons are in Russian.
-Machine-readable values such as `type`, `event`, and `reason` remain in English.
+Machine-readable values such as `status`, `type`, and `event` remain in English.
 
 ### API key errors
 
