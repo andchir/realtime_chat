@@ -337,12 +337,15 @@ users by their profile gender.
 
 ### Inactivity timeout
 
-A user who makes no requests or sends no WebSocket messages for longer than
-`CHAT_USER_TTL_SECONDS` is removed from memory. The default is `600` seconds (10
-minutes). Cleanup runs every 30 seconds. If a valid user UUID is no longer found
-when that user makes a new request or opens a WebSocket connection, the UUID is
-automatically added to the registry again. The `user_restored` response field
-indicates when this happened.
+A user who makes no requests for longer than `CHAT_USER_TTL_SECONDS` is removed
+from memory. While the user is in an active pair, every successfully delivered
+WebSocket message refreshes the activity time of both participants. Thus an
+ongoing dialog does not time out even if only one participant sent the latest
+message. The default timeout is `600` seconds (10 minutes), and cleanup runs
+every 30 seconds. If a valid user UUID is no longer found when that user makes a
+new request or opens a WebSocket connection, the UUID is automatically added to
+the registry again. The `user_restored` response field indicates when this
+happened.
 
 If the timeout closes an active pair, both participants first receive this system
 event (when their socket is still reachable):

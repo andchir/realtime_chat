@@ -804,6 +804,22 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 )
                 continue
 
+            # A successfully delivered message is activity for the dialog as a
+            # whole. Refresh both participants so a user who is reading and
+            # replying less often is not expired while messages are still being
+            # exchanged in the pair.
+            delivered_at = time.monotonic()
+            async with users_lock:
+                pair = pairs.get(pair_uuid)
+                if pair is not None:
+                    for participant_uuid in (
+                        pair.first_user_uuid,
+                        pair.second_user_uuid,
+                    ):
+                        participant = users.get(participant_uuid)
+                        if participant is not None:
+                            participant.last_seen = delivered_at
+
             await websocket.send_json(
                 {
                     "status": "paired",
