@@ -617,13 +617,6 @@ async def leave_pair(request: Request) -> JSONResponse:
 
 async def websocket_chat(websocket: WebSocket) -> None:
     """Register a socket and relay messages only within an active pair."""
-    supplied_api_key = websocket.headers.get("X-API-Key") or websocket.query_params.get(
-        "api_key"
-    )
-    if not api_key_is_valid(supplied_api_key):
-        await websocket.close(code=1008, reason="Неверный или отсутствующий API-ключ")
-        return
-
     user_uuid = parse_uuid(websocket.query_params.get("uuid"))
     if user_uuid is None:
         await websocket.close(code=1008, reason="Требуется корректный UUID пользователя")
