@@ -54,6 +54,7 @@ Replace the example value with a long random secret:
 ```dotenv
 CHAT_API_KEY=your-long-random-secret
 CHAT_USER_TTL_SECONDS=600
+CHAT_ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
 ```
 
 Generate a cryptographically secure API key with Python:
@@ -74,10 +75,16 @@ send it in application messages.
 `CHAT_USER_TTL_SECONDS` sets the inactivity timeout in seconds. It must be a
 positive integer; `600` is 10 minutes.
 
+`CHAT_ALLOWED_ORIGINS` is a comma-separated list of websites allowed to open a
+browser WebSocket connection. Each value must be an exact HTTP(S) origin without
+a path, for example `https://chat.example.com`. Add every frontend origin used
+in development or production. WebSocket clients without an `Origin` header,
+such as CLI and native applications, remain supported.
+
 The real `.env` file is excluded by `.gitignore`. The server refuses to start if
-`CHAT_API_KEY` is missing or empty, or if the timeout is invalid. System
-environment variables with the same names take precedence over values from
-`.env`.
+`CHAT_API_KEY` or `CHAT_ALLOWED_ORIGINS` is missing or invalid, or if the timeout
+is invalid. System environment variables with the same names take precedence
+over values from `.env`.
 
 Start the server:
 
@@ -118,6 +125,7 @@ Response:
 {
   "status": "connected",
   "uuid": "f79aaf1d-6c89-47ea-96e9-8e45ea113740",
+  "reconnected": false,
   "requested_uuid_was_occupied": false,
   "gender": "male",
   "age": 28,
@@ -156,8 +164,14 @@ curl -X POST http://localhost:8000/api/connect \
   }'
 ```
 
-If that UUID is already present in memory, the server creates and returns a new
-UUID. An invalid UUID produces a `400 Bad Request` response.
+If that UUID is already present in memory, the server reconnects the same user,
+updates their profile and returns `"reconnected": true` with `200 OK`. The
+existing WebSocket, active pair and match history are preserved. A new user is
+returned with `"reconnected": false` and `201 Created`. The legacy
+`requested_uuid_was_occupied` field is retained for compatibility and has the
+same value as `reconnected`. An invalid UUID produces a `400 Bad Request`
+response. An empty `uuid` or a string containing only whitespace is treated as
+an omitted value and creates a new user.
 
 ### Open a WebSocket connection
 
@@ -185,7 +199,8 @@ The server confirms the connection:
 ```
 
 If another socket is opened with the same UUID, it replaces the previous
-connection.
+connection. Browser WebSocket handshakes are accepted only when their `Origin`
+header is listed in `CHAT_ALLOWED_ORIGINS`.
 
 ### Get a random interlocutor
 

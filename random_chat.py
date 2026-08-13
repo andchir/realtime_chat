@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator
+from urllib.parse import urlsplit
 
 import uvicorn
 from starlette.applications import Starlette
@@ -33,6 +34,7 @@ DEFAULT_USER_TTL_SECONDS = 10 * 60
 CLEANUP_INTERVAL_SECONDS = 30
 API_KEY_ENV_NAME = "CHAT_API_KEY"
 USER_TTL_ENV_NAME = "CHAT_USER_TTL_SECONDS"
+ALLOWED_ORIGINS_ENV_NAME = "CHAT_ALLOWED_ORIGINS"
 ENV_FILE = Path(__file__).with_name(".env")
 
 
@@ -75,6 +77,7 @@ users: dict[str, User] = {}
 pairs: dict[str, Pair] = {}
 users_lock = asyncio.Lock()
 user_ttl_seconds = DEFAULT_USER_TTL_SECONDS
+allowed_origins: frozenset[str] = frozenset()
 
 
 def load_dotenv(path: Path = ENV_FILE) -> None:
@@ -118,6 +121,63 @@ def configured_user_ttl_seconds() -> int:
             f"{USER_TTL_ENV_NAME} должен быть положительным целым числом"
         )
     return timeout
+
+
+def normalize_origin(value: str) -> str | None:
+    """Return a normalized HTTP origin or None for an invalid value."""
+    origin = value.strip()
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+
+    host = parsed.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    default_port = (parsed.scheme.lower() == "http" and port == 80) or (
+        parsed.scheme.lower() == "https" and port == 443
+    )
+    port_suffix = f":{port}" if port is not None and not default_port else ""
+    return f"{parsed.scheme.lower()}://{host}{port_suffix}"
+
+
+def configured_allowed_origins() -> frozenset[str]:
+    raw_value = os.environ.get(ALLOWED_ORIGINS_ENV_NAME, "")
+    values = [value.strip() for value in raw_value.split(",") if value.strip()]
+    if not values:
+        raise RuntimeError(
+            f"{ALLOWED_ORIGINS_ENV_NAME} не настроен. "
+            "Укажите разрешенные HTTP(S) origins через запятую."
+        )
+
+    normalized_origins: set[str] = set()
+    for value in values:
+        normalized = normalize_origin(value)
+        if normalized is None:
+            raise RuntimeError(
+                f"Некорректный origin в {ALLOWED_ORIGINS_ENV_NAME}: {value!r}"
+            )
+        normalized_origins.add(normalized)
+    return frozenset(normalized_origins)
+
+
+def websocket_origin_is_allowed(origin: str | None) -> bool:
+    """Allow non-browser clients or a browser from a configured origin."""
+    if origin is None:
+        return True
+    normalized = normalize_origin(origin)
+    return normalized is not None and normalized in allowed_origins
 
 
 def api_key_is_valid(candidate: str | None) -> bool:
@@ -326,11 +386,12 @@ async def cleanup_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: Starlette) -> AsyncIterator[None]:
-    global user_ttl_seconds
+    global allowed_origins, user_ttl_seconds
 
     load_dotenv()
     configured_api_key()
     user_ttl_seconds = configured_user_ttl_seconds()
+    allowed_origins = configured_allowed_origins()
     cleanup_task = asyncio.create_task(cleanup_loop())
     try:
         yield
@@ -360,7 +421,7 @@ async def read_json(request: Request) -> tuple[dict | None, JSONResponse | None]
 
 
 async def connect(request: Request) -> JSONResponse:
-    """Connect a user. An occupied requested UUID is replaced with a new one."""
+    """Create a user or reconnect an existing user by UUID."""
     authorization_error = authorize_http(request)
     if authorization_error:
         return authorization_error
@@ -377,6 +438,8 @@ async def connect(request: Request) -> JSONResponse:
     assert profile is not None
 
     requested_value = data.get("uuid")
+    if isinstance(requested_value, str) and not requested_value.strip():
+        requested_value = None
     requested_uuid = parse_uuid(requested_value) if requested_value is not None else None
     if requested_value is not None and requested_uuid is None:
         return JSONResponse(
@@ -387,20 +450,29 @@ async def connect(request: Request) -> JSONResponse:
     now = time.monotonic()
     await purge_inactive_users(now)
     async with users_lock:
-        uuid_was_occupied = requested_uuid in users if requested_uuid else False
-        user_uuid = str(uuid.uuid4()) if not requested_uuid or uuid_was_occupied else requested_uuid
-        while user_uuid in users:
-            user_uuid = str(uuid.uuid4())
-        users[user_uuid] = User(last_seen=now, **profile)
+        reconnected = requested_uuid in users if requested_uuid else False
+        if reconnected:
+            assert requested_uuid is not None
+            user_uuid = requested_uuid
+            user = users[user_uuid]
+            user.last_seen = now
+            for field_name, value in profile.items():
+                setattr(user, field_name, value)
+        else:
+            user_uuid = requested_uuid or str(uuid.uuid4())
+            while user_uuid in users:
+                user_uuid = str(uuid.uuid4())
+            users[user_uuid] = User(last_seen=now, **profile)
 
     return JSONResponse(
         {
             "status": "connected",
             "uuid": user_uuid,
-            "requested_uuid_was_occupied": uuid_was_occupied,
+            "reconnected": reconnected,
+            "requested_uuid_was_occupied": reconnected,
             **profile,
         },
-        status_code=201,
+        status_code=200 if reconnected else 201,
     )
 
 
@@ -617,6 +689,10 @@ async def leave_pair(request: Request) -> JSONResponse:
 
 async def websocket_chat(websocket: WebSocket) -> None:
     """Register a socket and relay messages only within an active pair."""
+    if not websocket_origin_is_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=1008, reason="Источник WebSocket не разрешен")
+        return
+
     user_uuid = parse_uuid(websocket.query_params.get("uuid"))
     if user_uuid is None:
         await websocket.close(code=1008, reason="Требуется корректный UUID пользователя")

@@ -83,9 +83,12 @@ Add the generated key and the inactivity timeout in seconds:
 ```dotenv
 CHAT_API_KEY=replace-this-with-the-generated-key
 CHAT_USER_TTL_SECONDS=600
+CHAT_ALLOWED_ORIGINS=https://chat.example.com
 ```
 
-The timeout must be a positive integer. Keep `.env` secret; never commit it to
+The timeout must be a positive integer. `CHAT_ALLOWED_ORIGINS` contains the
+comma-separated exact HTTP(S) origins allowed to establish browser WebSocket
+connections; do not include URL paths. Keep `.env` secret; never commit it to
 Git. To rotate the API key, change it here and restart the service. Existing
 clients must then reconnect with the new key.
 
