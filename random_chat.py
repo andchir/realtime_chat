@@ -46,6 +46,7 @@ class User:
     desired_gender: str = "any"
     desired_age_over: int = 0
     desired_age_under: int = 121
+    keyword: str = ""
     matched_peer_uuids: set[str] = field(default_factory=set, repr=False)
     active_pair_uuid: str | None = None
     websocket: WebSocket | None = field(default=None, repr=False)
@@ -220,11 +221,17 @@ def parse_profile(data: dict) -> tuple[dict[str, str | int] | None, str | None]:
     age = integer_from_string(data.get("age"))
     desired_age_over = integer_from_string(data.get("desired_age_over"))
     desired_age_under = integer_from_string(data.get("desired_age_under"))
+    keyword = data.get("keyword", "")
 
     if isinstance(gender, str):
         gender = gender.strip().lower()
     if isinstance(desired_gender, str):
         desired_gender = desired_gender.strip().lower()
+    if keyword is None:
+        keyword = ""
+    if not isinstance(keyword, str):
+        return None, "Ключевое слово должно быть строкой"
+    keyword = keyword.strip()
 
     if gender not in {"male", "female"}:
         return None, "Пол должен быть 'male' или 'female'"
@@ -253,6 +260,7 @@ def parse_profile(data: dict) -> tuple[dict[str, str | int] | None, str | None]:
         "desired_gender": desired_gender,
         "desired_age_over": desired_age_over,
         "desired_age_under": desired_age_under,
+        "keyword": keyword,
     }, None
 
 
@@ -272,7 +280,8 @@ def profiles_are_compatible(first: User, second: User) -> bool:
         and first.age > second.desired_age_over
         and first.age < second.desired_age_under
     )
-    return first_accepts_second and second_accepts_first
+    keywords_match = first.keyword.casefold() == second.keyword.casefold()
+    return first_accepts_second and second_accepts_first and keywords_match
 
 
 def remove_inactive_users(now: float) -> CleanupActions:
