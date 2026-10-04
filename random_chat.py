@@ -569,7 +569,9 @@ async def random_peer(request: Request) -> JSONResponse:
                     "reason": "not_found",
                     "pair_uuid": None,
                     "user_restored": restored,
-                }
+                    "error": "Собеседник не найден. Пожалуйста, попробуйте повторить попытку позже."
+                },
+                status_code=422,
             )
 
         pair_uuid = str(uuid.uuid4())
